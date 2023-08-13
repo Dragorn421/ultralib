@@ -485,7 +485,7 @@ x32 x3E 2   2   e_shstrndx      index of the section header table entry containi
 x34 x40         END
     """
 
-    def __init__(self, data):
+    def __init__(self, data: memoryview):
         self.from_bin(data)
         assert self.e_ident[EI_CLASS] == EI_CLASS_32
         assert self.e_ident[EI_DATA] == EI_DATA_BE
@@ -780,7 +780,7 @@ x24 x38 4   8   sh_entsize      Contains the size, in bytes, of each entry, for 
 x28 x40         END
     """
 
-    def __init__(self, header, elf_file, index):
+    def __init__(self, header: memoryview, elf_file: "ElfFile", index):
         self.late_init_done = False
         self.sh_name, self.sh_type, \
             self.sh_flags, self.sh_addr, \
@@ -946,11 +946,11 @@ class StrtabSection(Section):
     """
     def __init__(self, header, data, index):
         super().__init__(header, data, index)
+        self.data_bytes = self.data.tobytes()
 
     def lookup_str(self, index):
-        to = self.data.find(b'\0', index)
-        assert to != -1
-        return self.data[index:to].decode('latin1')
+        to = self.data_bytes.index(0, index)
+        return self.data_bytes[index:to].decode('latin1')
 
 class RelocationSection(Section):
     """
@@ -1032,14 +1032,12 @@ class MdebugSection(Section):
         return None
 
     def read_string(self, index):
-        to = self.elf_file.data.find(b'\0', self.hdrr.cbSsOffset + index)
-        assert to != -1
-        return self.elf_file.data[self.hdrr.cbSsOffset + index:to].decode("ASCII")
+        to = self.elf_file.data_bytes.index(0, self.hdrr.cbSsOffset + index)
+        return self.elf_file.data_bytes[self.hdrr.cbSsOffset + index:to].decode("ASCII")
 
     def read_ext_string(self, index):
-        to = self.elf_file.data.find(b'\0', self.hdrr.cbSsExtOffset + index)
-        assert to != -1
-        return self.elf_file.data[self.hdrr.cbSsExtOffset + index:to].decode("ASCII")
+        to = self.elf_file.data_bytes.index(0, self.hdrr.cbSsExtOffset + index)
+        return self.elf_file.data_bytes[self.hdrr.cbSsExtOffset + index:to].decode("ASCII")
 
 class ReginfoSection(Section):
     """
@@ -1053,7 +1051,7 @@ class ReginfoSection(Section):
 # =====================================================================================================
 
 class ElfFile:
-    def __init__(self, data):
+    def __init__(self, data: memoryview):
         def init_section(i):
             offset = self.elf_header.e_shoff + i * self.elf_header.e_shentsize
             section_type = struct.unpack(">I", data[offset + 4:][:4])[0]
@@ -1073,6 +1071,7 @@ class ElfFile:
                 return Section(header_data, self, i)
 
         self.data = data
+        self.data_bytes = data.tobytes()
         self.elf_header = ElfHeader(data[0:52])
 
         num_progheaders = self.elf_header.e_phnum
@@ -1127,40 +1126,41 @@ class ElfFile:
 if __name__ == "__main__":
     import sys
 
-    elf_file = None
-
     with open(sys.argv[1], "rb") as elf:
-        elf_file = ElfFile(bytearray(elf.read()))
+        data = memoryview(elf.read())
+    elf_file = ElfFile(data)
 
     # Header Info Test
     print(elf_file.elf_header)
-    # Program Headers Info Test
-    print("")
-    print("Program Headers:")
-    print("  Type      Offset   VirtAddr   PhysAddr   FileSiz MemSiz  Flg Align")
-    for phdr in elf_file.progheaders:
-        print(phdr)
-    # Section Headers Info Test
-    print("")
-    print("Section Headers:")
-    print("  [Nr] Name        Type         Addr     Off    Size   ES Flg Lk Inf    Al")
-    for i,s in enumerate(elf_file.sections,0):
-        print(f"  [{i:2}] {s}")
-    # Symbols Info Test
-    if elf_file.symtab is not None:
+    PRINT_STUFF_OTHER_THAN_MDEBUG = True
+    if PRINT_STUFF_OTHER_THAN_MDEBUG:
+        # Program Headers Info Test
         print("")
-        print(f"Symbol table '{elf_file.symtab.name}' contains {len(elf_file.symtab.symbol_entries)} entries")
-        print("   Num:    Value   Size    Type   Bind     Vis   Ndx        Name")
-        for i,sym in enumerate(elf_file.symtab.symbol_entries,0):
-            print(f"{i:6}: {sym}")
-    # Relocations Info Test
-    print("")
-    for s in elf_file.sections:
-        if s.is_rel():
-            print(f"\nRelocation section '{s.name}' at offset 0x{s.sh_offset:06X} contains {len(s.relocations)} entries:")
-            print(" Offset     Info     Type            Sym.Value  Sym.Name + Addend")
-            for reloc in s.relocations:
-                print(f"{reloc}")
+        print("Program Headers:")
+        print("  Type      Offset   VirtAddr   PhysAddr   FileSiz MemSiz  Flg Align")
+        for phdr in elf_file.progheaders:
+            print(phdr)
+        # Section Headers Info Test
+        print("")
+        print("Section Headers:")
+        print("  [Nr] Name        Type         Addr     Off    Size   ES Flg Lk Inf    Al")
+        for i,s in enumerate(elf_file.sections,0):
+            print(f"  [{i:2}] {s}")
+        # Symbols Info Test
+        if elf_file.symtab is not None:
+            print("")
+            print(f"Symbol table '{elf_file.symtab.name}' contains {len(elf_file.symtab.symbol_entries)} entries")
+            print("   Num:    Value   Size    Type   Bind     Vis   Ndx        Name")
+            for i,sym in enumerate(elf_file.symtab.symbol_entries,0):
+                print(f"{i:6}: {sym}")
+        # Relocations Info Test
+        print("")
+        for s in elf_file.sections:
+            if s.is_rel():
+                print(f"\nRelocation section '{s.name}' at offset 0x{s.sh_offset:06X} contains {len(s.relocations)} entries:")
+                print(" Offset     Info     Type            Sym.Value  Sym.Name + Addend")
+                for reloc in s.relocations:
+                    print(f"{reloc}")
     # mdebug Info Test
     print("")
     mdebug_section = elf_file.find_section_by_type(SHT_MIPS_DEBUG)

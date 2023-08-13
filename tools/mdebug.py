@@ -3,6 +3,9 @@
 #   .mdebug section
 #
 
+class WorkaroundException(Exception):
+    pass
+
 """
 References:
 https://www.cs.unibo.it/~solmi/teaching/arch_2002-2003/AssemblyLanguageProgDoc.pdf
@@ -426,7 +429,10 @@ class EcoffSymr:
             if self.st == EcoffSt.STATICPROC:
                 self.c_repr += "static "
 
-            self.return_type, _ = self.process_type_information(1)
+            try:
+                self.return_type, _ = self.process_type_information(1)
+            except WorkaroundException as e:
+                self.return_type = str(e)
             self.c_repr += self.return_type
             if len(self.return_type) != 0:
                 self.c_repr += " "
@@ -438,14 +444,21 @@ class EcoffSymr:
                 # value of a stMember is the offset in bits
                 self.c_repr += f"/* 0x{self.value//8:X} */ "
 
-            type_str, bitwidth = self.process_type_information(0)
+            try:
+                type_str, bitwidth = self.process_type_information(0)
+            except WorkaroundException as e:
+                type_str = str(e)
+                bitwidth = "?(WorkaroundException)"
             self.c_repr += type_str
             if len(self.c_repr) != 0:
                 self.c_repr += " "
             self.c_repr += f"{self.name}{f' : {bitwidth}' if bitwidth is not None else ''};"
         elif self.st == EcoffSt.TYPEDEF:
             # TODO the typedef may already be absorbed into a struct or similar, check before emitting
-            type_str, _ = self.process_type_information(0)
+            try:
+                type_str, _ = self.process_type_information(0)
+            except WorkaroundException as e:
+                type_str = str(e)
             self.c_repr = f"typedef {type_str} {self.name};"
         elif self.st == EcoffSt.LABEL:
             self.c_repr = f"{self.name}:"
@@ -522,7 +535,10 @@ class EcoffSymr:
                 ind += 1
 
             fdr_ref = self.fdr.parent.fdrs[fd_ref_idx]
-            sym_ref = fdr_ref.symrs[type_ref_aux.rndx.index]
+            try:
+                sym_ref = fdr_ref.symrs[type_ref_aux.rndx.index]
+            except IndexError as e:
+                raise WorkaroundException(e)
             # now we have the reference to the stStruct, stUnion, stEnum, or stTypeDef
             type_str += f"{sym_ref.type_name if sym_ref.type_name is not None else sym_ref.name}"
         else:
@@ -896,7 +912,7 @@ class EcoffHDRR:
     HDRR_MAGIC = 0x7009
     SIZE = 0x60
 
-    def __init__(self, data) -> None:
+    def __init__(self, data: memoryview) -> None:
         self.data = data[:EcoffHDRR.SIZE]
 
         self.magic, self.vstamp, self.ilineMax, self.cbLine, \
