@@ -174,18 +174,18 @@ class EcoffLiner:
     } tLINER, *pLINER;
     """
 
-    def __init__(self, data) -> None:
+    def __init__(self, data: memoryview) -> None:
         self.count = get_bitrange(data[0], 0, 4) + 1
         self.delta = get_bitrange(data[0], 4, 4)
 
         if self.delta == 8:
             self.is_extended = True
             self.delta = sign_extend_16((data[1] << 8) | data[2])
-            self.data = data[:3]
+            self.data_memoryview = data[:3]
         else:
             self.is_extended = False
             self.delta = sign_extend_4(self.delta)
-            self.data = data[:1]
+            self.data_memoryview = data[:1]
 
     def __str__(self) -> str:
         return f"""= EcoffLiner =============
@@ -302,8 +302,8 @@ class EcoffAux:
     """
     SIZE = 4
 
-    def __init__(self, fdr, data, endian) -> None:
-        data = struct.unpack((">" if endian == 1 else "<") + "I", data)[0]
+    def __init__(self, fdr, data_memoryview: memoryview, endian) -> None:
+        data = struct.unpack((">" if endian == 1 else "<") + "I", data_memoryview)[0]
         self.ti = EcoffTir(data, endian)
         self.rndx = EcoffRNDXR(data, endian)
         self.dnLow = self.dnHigh = self.isym = self.iss = self.width = self.count = data
@@ -635,6 +635,7 @@ class EcoffPdr:
         # iline = self.iline
 
         elf_data = self.parent.parent.parent.data
+        elf_data_memoryview = memoryview(elf_data)
 
         line_no = self.lnLow # first line in the procedure
         line_data = self.parent.parent.hdrr.cbLineOffset + self.parent.cbLineOffset + self.cbLineOffset
@@ -646,7 +647,7 @@ class EcoffPdr:
         while len(self.lines) < self.size//4:
             # assert line_data < line_end , "Overflow in line numbers table"
 
-            liner = EcoffLiner(elf_data[line_data:])
+            liner = EcoffLiner(elf_data_memoryview[line_data:])
             line_no += liner.delta
             # if line_no < self.lnLow or line_no > self.lnHigh:
             #     break
@@ -656,7 +657,7 @@ class EcoffPdr:
                 # print(f"[{len(self.lines)}] {line_no}")
                 self.lines.append(line_no)
 
-            line_data += len(liner.data)
+            line_data += len(liner.data_memoryview)
 
     def lookup_sym(self, value, type=-1):
         for sym in self.symrs:
@@ -756,13 +757,14 @@ class EcoffFdr:
 
         hdrr = self.parent.hdrr
         elf_data = self.parent.parent.data
+        elf_data_memoryview = memoryview(elf_data)
 
         # Aux Symbols
         self.auxs = []
         for i in range(self.caux):
             i += self.iauxBase
             assert i < hdrr.iauxMax , "Out of bounds in Auxiliary Symbol Table"
-            aux = EcoffAux(self, elf_data[hdrr.cbAuxOffset+i*EcoffAux.SIZE:][:EcoffAux.SIZE], self.fBigEndian)
+            aux = EcoffAux(self, elf_data_memoryview[hdrr.cbAuxOffset+i*EcoffAux.SIZE:][:EcoffAux.SIZE], self.fBigEndian)
             self.auxs.append(aux)
 
         # Symbols

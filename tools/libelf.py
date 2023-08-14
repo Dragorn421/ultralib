@@ -590,11 +590,11 @@ x1C x30 4   8   p_align     0 or 1 : No alignment , 2^x : Align 2^x
 x20 x38         END
     """
 
-    def __init__(self, data, arch):
+    def __init__(self, data: memoryview, arch):
         self.arch = arch
         self.from_bin(data)
 
-    def from_bin(self, data):
+    def from_bin(self, data: memoryview):
         if self.arch == EI_CLASS_32: # flags are located differently based on 32 bit or 64 bit due to alignment
             self.p_type,  self.p_offset, self.p_vaddr, self.p_paddr, \
                 self.p_filesz, self.p_memsz, self.p_flags, self.p_align = struct.unpack(PROGHDR32_BIG_STRUCT, data)
@@ -780,7 +780,7 @@ x24 x38 4   8   sh_entsize      Contains the size, in bytes, of each entry, for 
 x28 x40         END
     """
 
-    def __init__(self, header, elf_file, index):
+    def __init__(self, header: memoryview, elf_file, index):
         self.late_init_done = False
         self.sh_name, self.sh_type, \
             self.sh_flags, self.sh_addr, \
@@ -793,7 +793,7 @@ x28 x40         END
         if self.sh_type in [SHT_NULL, SHT_NOBITS]:
             self.data = None
         else:
-            self.data = elf_file.data[self.sh_offset:][:self.sh_size]
+            self.data = elf_file.data[self.sh_offset : self.sh_offset + self.sh_size]
         self.index = index
         self.relocated_by = []
         self.elf_file = elf_file
@@ -1054,23 +1054,27 @@ class ReginfoSection(Section):
 
 class ElfFile:
     def __init__(self, data):
+        data_memoryview = memoryview(data)
+
         def init_section(i):
             offset = self.elf_header.e_shoff + i * self.elf_header.e_shentsize
-            section_type = struct.unpack(">I", data[offset + 4:][:4])[0]
-            header_data = data[offset:][:self.elf_header.e_shentsize]
+            section_type = struct.unpack(">I", data_memoryview[offset + 4:][:4])[0]
+            header_data_memoryview = data_memoryview[offset:][:self.elf_header.e_shentsize]
+            def get_header_data_bytes():
+                return header_data_memoryview.tobytes()
 
             if section_type == SHT_REL or section_type == SHT_RELA:
-                return RelocationSection(header_data, self, i)
+                return RelocationSection(get_header_data_bytes(), self, i)
             elif section_type == SHT_SYMTAB:
-                return SymtabSection(header_data, self, i)
+                return SymtabSection(get_header_data_bytes(), self, i)
             elif section_type == SHT_STRTAB:
-                return StrtabSection(header_data, self, i)
+                return StrtabSection(get_header_data_bytes(), self, i)
             elif section_type == SHT_MIPS_DEBUG:
-                return MdebugSection(header_data, self, i)
+                return MdebugSection(get_header_data_bytes(), self, i)
             elif section_type == SHT_MIPS_REGINFO:
-                return ReginfoSection(header_data, self, i)
+                return ReginfoSection(get_header_data_bytes(), self, i)
             else:
-                return Section(header_data, self, i)
+                return Section(header_data_memoryview, self, i)
 
         self.data = data
         self.elf_header = ElfHeader(data[0:52])
@@ -1082,7 +1086,7 @@ class ElfFile:
         self.progheaders = []
         for i in range(num_progheaders):
             offset = self.elf_header.e_phoff + i * self.elf_header.e_phentsize
-            self.progheaders.append(ProgramHeader(data[offset:][:self.elf_header.e_phentsize], self.elf_header.e_ident[EI_CLASS]))
+            self.progheaders.append(ProgramHeader(data_memoryview[offset:][:self.elf_header.e_phentsize], self.elf_header.e_ident[EI_CLASS]))
 
         # Init sections
         self.sections = []
